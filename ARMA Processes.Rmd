@@ -1,0 +1,165 @@
+---
+title: "ARMA Processes"
+output: html_notebook
+---
+
+In this notebook I will give some examples for how to use some functions and tools related to the analysis of ARIMA processes.
+
+```{r, include=FALSE}
+library(ggplot2)
+# ggplot theme
+par(mfrow = c(2,1), mar = c(3,5,4,4), cex = 0.4)
+
+th <- theme_minimal() + 
+  theme(plot.title = element_text(size=11, face="bold"),
+        axis.title.x = element_text(size=9),                
+        axis.title.y = element_text(size=9),
+        legend.text = element_text(size=7),
+        legend.title = element_text(size=9),
+        axis.text = element_text(size=7),
+        strip.text = element_text(size=10, face = "italic"),
+        panel.border = element_rect(colour = "black", fill = NA, size = 1))
+```
+
+
+```{r, message=FALSE}
+# Start by importing a dataset
+
+library(tseries)
+library(forecast)
+library(ggplot2)
+
+data("USeconomic")
+autoplot(USeconomic, facets = TRUE) + th
+```
+
+
+
+```{r}
+# Extract the log_GNP series
+
+log_gnp <- USeconomic[,"log(GNP)"]
+autoplot(log_gnp) + th
+```
+
+```{r}
+# Time Series Decomposition
+log_gnp_decomposition <- decompose(log_gnp)
+autoplot(log_gnp_decomposition) + th
+```
+
+If you have a seasonal time series, you can seasonally adjust the series by estimating the seasonal component, and subtracting it from the original time series. In our case, we are going to difference the series instead.
+
+```{r}
+#Differencing the time-series
+gnp_growth <- diff(y, lag = 1)
+
+#Plotting the data
+autoplot(gnp_growth, main = "GNP growth rate (quarter on quarter)") + th
+```
+
+
+```{r}
+# ADF test to check for stationarity
+adf.test(gnp_growth)
+```
+
+We reject the null hypothesis that gnp_growth has a unit root: it is stationary. Since gnp_growth is stationary, we can apply the Box-Jenkins approach and try to fit a suitable ARMA model to the data. We wil start by examining the ACF and the PACF charts. 
+
+```{r}
+#Plotting the estimated acf and pacf of GNP_growth
+ggAcf(GNP_growth, lag.max = 10, main = "ACF GNP growth rate") + th 
+ggAcf(GNP_growth, lag.max = 10 ,type = "partial", main = "Partial ACF GNP growth rate") + th
+```
+
+As we can see in the previous chart, the partial acf in not significantly different from zero from the first lag onwards. This could suggest that an AR(1) process could fit well our time-series. The acf is decreasing and not significantly different from zero after the second lag. All considered, it can be plausible to consider also a moving average component. Hence we will consider an AR(1) and an ARMA(1,1). We can plot the theorical ACF and PACF for the two processes to check whether they could be a good fit.
+
+```{r}
+# AR(1)
+plot(ARMAacf(0.1, 0, lag.max = 10), type = "h")
+plot(ARMAacf(0.1, 0, lag.max = 10, pacf =TRUE) , type = "h")
+```
+
+```{r}
+# ARMA(1,1)
+plot(ARMAacf(0.1, 0.3, lag.max = 10), type = "h")
+plot(ARMAacf(0.1, 0.3, lag.max = 10, pacf =TRUE) , type = "h")
+```
+
+It is now time to fit the models to the data. 
+
+```{r}
+#Models estimation
+mod_1 <- arima(GNP_growth, order=c(1,0,0)) # Parmameters order follow the model name: AR - I - MA
+mod_2 <- arima(GNP_growth, order=c(1,0,1))
+
+#Reporting the coefficients estimates and their standard errors (as well as other statistics)
+mod_1
+mod_2
+```
+
+According to the AIC criterion, the AR(1) specification is superior. Before proceding with this specification, let's check what the auto.arima function from the forecast package picks as a model.
+
+```{r}
+auto.arima(GNP_growth)
+```
+
+As we can see, also the auto.arima function would have selected the AR(1) specification. We can now proceed with model diagnostic and forecasting.
+
+```{r}
+# time series diagnostic
+tsdiag(mod_1)
+```
+
+As we can see from the diagnostic plots, it seems that the residuals are not autocorrelated. This is evident from the ACF plot and confirmed by the p-values for the Ljung-Box statistc. We can now proceed by checking the normality of the residuals.
+
+```{r}
+# With base R functions
+qqnorm(mod_1$residuals)
+qqline(mod_1$residuals)
+```
+
+The normality assumption seems to be a reasonable one. Let us check this assumption with a Shapiro test.
+
+```{r}
+shapiro.test(mod_1$residuals)
+```
+
+We fail to reject the null hypothesis of normality at the 5% confidence level. Normality seems to be a good assumptions for the residuals' distribution. Let's now forecast the series. As a first step, let us look at how the model qould hae performed looking backwards, then let's give some projections.
+
+```{r, warning=FALSE}
+# R functions
+upper <- fitted(mod_1) + 1.96*sqrt(mod_1$sigma2)
+lower <- fitted(mod_1) - 1.96*sqrt(mod_1$sigma2)
+#plot(gnp_growth, type="n", ylim=range(lower,upper))
+#polygon(c(time(gnp_growth),rev(time(gnp_growth))), c(upper,rev(lower)), 
+#   col=rgb(0,0,0.6,0.2), border=FALSE)
+#lines(gnp_growth)
+#lines(fitted(mod_1),col='red')
+out <- (gnp_growth < lower | gnp_growth > upper)
+#points(time(gnp_growth)[out], gnp_growth[out], pch=19)
+
+# ggplot
+
+out = out*gnp_growth
+out[out == FALSE] = NA
+
+ggplot(data = data.frame(time = time(gnp_growth),gnp_growth, fitted = fitted(mod_1), upper, lower, out), aes(x = time, y = gnp_growth)) + th +
+  geom_line(aes(y = gnp_growth)) + 
+  geom_line(aes(y = fitted), col = "red") +
+  scale_y_continuous(expand = c(0,0)) + 
+  geom_ribbon(aes(ymin=lower, ymax=upper), alpha = 0.2) +
+  geom_point(aes(y = out))
+```
+
+```{r}
+autoplot(forecast(mod_1, h = 30)) + th
+```
+
+```{r}
+# With bootstrapped confidence interval
+autoplot(forecast(mod_1, h = 30, bootstrap = TRUE)) + th
+```
+
+
+
