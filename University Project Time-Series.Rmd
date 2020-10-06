@@ -1,0 +1,1332 @@
+---
+title: "Final Project"
+author: "Ludovico Genovese, Luca Laringe, Alessandro Pistoni, Francesco Maria Varchetta"
+date: "June 1st 2018"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  header-includes: \usepackage[fontsize=14pt]{scrextend}
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+```{r comment=NA, include = FALSE}
+#It prevents code from going out of the page
+library(formatR)
+library(knitr)
+opts_chunk$set(tidy.opts=list(width.cutoff=75),tidy=TRUE)
+```
+
+```{r setup, include=FALSE}
+def.chunk.hook  <- knitr::knit_hooks$get("chunk")
+knitr::knit_hooks$set(chunk = function(x, options) {
+  x <- def.chunk.hook(x, options)
+  ifelse(options$size != "normalsize", paste0("\\", options$size,"\n\n", x, "\n\n \\normalsize"), x)
+})
+
+knitr::opts_chunk$set(echo = T, message=F, size="footnotesize", dev = "cairo_pdf")
+```
+
+```{r comment=NA, include=FALSE, echo = FALSE, message=FALSE, warning= FALSE}
+#Loading useful libraies
+
+library(tseries)
+library(tidyverse)
+library(dlm)
+library(forecast)
+library(magrittr)
+library(stringr)
+library(ggfortify) #For time-series diagnostic
+library(extrafont) #Fro ggplot text fonts
+
+#To use the last package, uncomment the next lines
+
+# #font_import(prompt = FALSE)        #If you haven't done yet, uncomment also this line. It takes a while
+# loadfonts(device="win")       
+# 
+# #You need to have ghostscript installed on your pc (Set your own directory with the executable file)
+# Sys.setenv(R_GSCMD = "C:/Program Files/gs/gs9.23/bin/gswin64c.exe")
+# embed_fonts("FP.pdf")
+```
+
+
+```{r comment=NA, include = FALSE}
+
+#Definition of some useful ggplot layers
+#Defining layers for similar plots
+fc <- geom_line(aes(y = forecast),colour = "red")
+CI <- geom_ribbon(aes(ymin=lower, ymax=upper, x = time), 
+                  alpha=0.3,       
+                  linetype=1,      
+                  colour="grey70", 
+                  size=1,       
+                  fill="green")
+
+th <- theme_minimal() + 
+  theme(plot.title = element_text(size=9, face="bold"),
+        axis.title.x = element_text(size=7),                
+        axis.title.y = element_text(size=7),
+        legend.text = element_text(size=5),
+        legend.title = element_text(size=7),
+        axis.text = element_text(size=5),
+        strip.text = element_text(size=8, face = "italic"))
+
+#If you want the fonts right uncomment these lines:
+
+# th <- theme_minimal() + 
+#   theme(plot.title = element_text(size=9, face="bold", family="Times New Roman"),
+#         axis.title.x = element_text(size=7, family="Times New Roman"),                
+#         axis.title.y = element_text(size=7, family="Times New Roman"),
+#         legend.text = element_text(size=5, family="Times New Roman"),
+#         legend.title = element_text(size=7, family="Times New Roman"),
+#         axis.text = element_text(size=5, family="Times New Roman"),
+#         strip.text = element_text(size=8, face = "italic", family="Times New Roman"))
+
+```
+
+```{r comment=NA, include = FALSE}
+# Multiple plot function (Useful for ggplot charts)
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+```
+
+```{r comment=NA, include = FALSE}
+#Creates a function to produce qqplots in ggplot
+
+qqplot.data <- function (vec) # argument: vector of numbers
+{
+  # following four lines from base R's qqline()
+  y <- quantile(vec[!is.na(vec)], c(0.25, 0.75))
+  x <- qnorm(c(0.25, 0.75))
+  slope <- diff(y)/diff(x)
+  int <- y[1L] - slope * x[1L]
+
+  d <- data.frame(resids = vec)
+
+  ggplot(d, aes(sample = resids)) + stat_qq() + geom_abline(slope = slope, intercept = int) + th + ggtitle("Q-Q Plot")
+
+}
+```
+
+
+## Exercise 1
+
+**Point 1**
+
+```{r comment=NA, include = FALSE}
+#All the libraries were loaded above
+
+# For code reproducibility, set your own working directory
+
+# Reading the dataset
+
+### For code reproducibility, set your own working directory ###
+
+file_name <-"tracking_data_start=30min_record=120min_freq=30sec.csv"
+tracking_data <- read.delim(file_name)
+tracking_data_38 <- subset(tracking_data, track_id==38 & time<=7470)
+
+#Renormalizing time variable
+time_adj <- (tracking_data_38$time-1800)/30 + 1
+tracking_data_38_timeadj <- subset(tracking_data, track_id==38 & time<=7470) %>%
+  mutate(time=time_adj)
+
+tracking_data_38_timeadj$s <- NULL
+tracking_data_38_timeadj$track_id_seq <- NULL
+```
+
+Before starting the analysis, a preliminary remark is required. For plotting purposes, we only considered BPM, elevation, difference in elevation, and speed, thus excluding from the representation uninformative variables like "s" and "track_id_seq".
+Moreover, to facilitate the reading, we normalized the time variable in order to have on the horizontal axis the periods ranging from 1 to 190.
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 2.5, fig.width = 6.5, fig.align = "center"}
+
+#Plotting track 38
+plot_title <- str_c ("Track 38")
+
+track_long <-tracking_data_38_timeadj%>%
+  mutate(dfelev=elev-lag(elev))%>%
+  select(-track_id)%>%
+  gather(-time,key="variable",value="value")
+
+ggplot(track_long,aes(x=time, y=value)) +
+  geom_line(aes(colour = variable)) +
+  facet_wrap( ~ variable, ncol=2, scales="free") +
+  ylab("") + xlab("") +
+  th +
+  ggtitle(plot_title)
+
+```
+The patterns that appear from the graphs are coherent with what we intuitively expected. First, speed and change in elevation seem strongly negatively correlated (almost specular), meaning that peaks in speed are registered in correspondence of steep downhills and vice versa. Similarly, the highest heart rates correspond to upward slopes.
+As for trends and seasonalities, the variable that shows a clear trend is elevation. The trend is positive until about the 125th period, before becoming steadily negative. Focusing on BPM, instead, we could not detect trends or seasonalities, which would hinder stationarity.
+
+**Point 2**
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 1.5, fig.width = 6, fig.align = "center"}
+#Leaving aside the last 5 minutes
+tracking_data_38_timeadj_90<-subset(tracking_data_38_timeadj, time<=180)
+
+#Creating and plotting bpm time-series
+bpm_38 <- ts(tracking_data_38_timeadj_90$bpm)
+
+ggplot(data.frame(time = time(bpm_38), bpm_38 = bpm_38), aes(x = time, y = bpm_38)) + geom_line() + th + ggtitle("bpm_38")
+
+```
+Even after excluding the last five minutes (10 periods), it is hard to notice relevant trends, cycles or seasonalitites. Therefore, neither classical time series decomposition nor differencing seem necessary in order to achieve stationarity. Moreover, we believe reasonable to assume that heart rate have a constant mean, since it is naturally bounded by physiological constraints. The same holds for variance and autocovariance.
+\newpage
+
+#### (i) Checking for stationarity
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+
+#Use Box-Jenkins approach
+# (i) Checking for stationarity
+
+library(tseries)
+adf.test(bpm_38)
+
+```
+The test we are implementing is an Augmented Dickey-Fuller (ADF) test, which is aimed at testing the existence of unit roots in an ARMA model with K paramters.
+For instance, assuming that \((Y_t,t\geq0)\) is distributed as AR(2) we can write the process as follows:
+
+\(\quad \quad\quad  \quad\quad  \quad y_t=\alpha_1y_{t-1}+\alpha_2y_{t-2}+\epsilon_t\)
+
+\(\quad \quad\quad  \quad\quad  \quad y_t-y_{t-1}=-y_{t-1}+\alpha_2y_{t-1}-\alpha_2y_{t-1}+\alpha_1y_{t-1}+\alpha_2y_{t-2}+\epsilon_t\)
+
+readapting the equation, we obtain:
+
+\(\quad \quad\quad  \quad\quad  \quad\Delta y_t=\gamma y_{t-1}-\alpha_2 \Delta y_{t-1}+\epsilon_t\) where \(\epsilon_t \sim WN(0,\sigma^2)\) and \(-1+\alpha_1+\alpha_2=\gamma\)
+
+Accordingly, if one of the roots is 1, \(L^*=1\), when estimating the last model we should get \(\hat{\gamma}=0\) from the equation \(\alpha(B)=1-\alpha_1L-\alpha_2L^2=0\). Hence, we could run a T-test with a null hypothesis \(\gamma=0\). However, when the model is non stationary or close to non-stationarity it can be shown that the distribution of the t-test is not the standard one anymore. Dickey and Fuller (1979) provided the critical values for this non standard distribution. 
+Thus, in the case of an AR(2), the ADF command runs a T-test on \(\gamma\) under the null \(H_0: \gamma=0\), where the test-statistic is \(T= \frac{\hat\gamma-\gamma}{se(\hat{\gamma})} \sim^ {H_0} ADF \)
+
+Moving back to our case, the null hypothesis of non-stationarity can be rejected at the 10% level, suggesting that the time series is stationary. 
+Nonetheless, let us try to differentiate the model in order to detect whether we can reject non-stationarity at a lower p-value.
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+#Differencing the BPM series
+
+delta_bpm <- diff(bpm_38, lag = 1)
+adf.test(delta_bpm)
+```
+As expected, the p-value for the stationarity test in the differenced model is lower.
+Still, differencing the data to make them even more stationary would not be advisable in our case. Quoting Chatfield, "my personal preference is to avoid transformations whenever possible except where the transformed variable has a direct physical interpretation". In this sense, the change in BPM over a 30 seconds period would not be a meaningful variable. Therefore, we decide to proceed the analysis using the original time-series for BPM.
+
+#### (ii) Model specification
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE,, fig.height = 2, fig.width = 6, fig.align = "center"}
+#(ii) Model specification
+
+# Plotting the estimated acf and pacf of BPM
+par(mfrow = c(1, 2), mar = c(3, 5, 4, 4), cex = 0.4)
+
+ACF <- acf(bpm_38, lag.max = 6, main = "ACF", plot = FALSE)
+PACF <- acf(bpm_38, lag.max = 6, type = "partial", main = "Partial ACF", plot = FALSE)
+
+confidence_band_value <- -qnorm(1- 0.975)/sqrt(length(bpm_38))
+upper = rep.int(confidence_band_value, 7)
+lower = rep.int(-confidence_band_value, 7)
+
+acf_dataframe <- data.frame(lag = ACF$lag, acf = ACF$acf, pacf = c(NA,PACF$acf), lower, upper)
+
+acf_dataframe_long <- acf_dataframe %>% 
+  gather(key = "variable", value = "value",-lag,-lower,-upper)
+
+ggplot(acf_dataframe_long, aes(x = lag, y = value)) +
+  th + ggtitle("ACF and PACF for bpm_38") +
+  geom_bar(aes(fill = variable), stat = "identity", width = 0.1)+
+  ylab("") + xlab("") +
+  facet_wrap( ~ variable, ncol=2) +
+  geom_line(aes(y = lower), linetype = "dashed") +
+  geom_line(aes(y = upper), linetype = "dashed") +
+  theme(legend.position = "none") 
+
+```
+
+The estimated *acf* is monotonically decreasing toward zero, suggesting the presence of an autoregressive component with positive coefficients. Since the estimated partial acf shows a significantly negative value for the second lag, we exclude the possibility of an AR(1) model. This feature of the *pacf* can be explained by the presence either of a second autoregressive component or of a moving average component. 
+For these reasons, we will compare the performances of three alternative models: an AR(2), an ARMA(1,1) and an ARMA(1,2). 
+First, we estimate the parameters for each case. 
+
+#### (iii) Estimation of the parameters
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+#(iii) Estimation of the parameters
+
+# Searching for the best ARIMA model for the ts
+library(forecast)
+
+mod1 <- arima(bpm_38, order=c(2,0,0))
+
+mod2 <- arima(bpm_38, order=c(1,0,1))
+
+mod3 <- arima(bpm_38, order=c(1,0,2))
+
+armacoeff <- matrix(c(round(mod1$coef[1],4), round(mod2$coef[1],4), round(mod3$coef[1],4),
+                      round(mod1$coef[2],4), "", "",
+                    "", round(mod2$coef[2],2), round(mod3$coef[2],4),
+                    "", "", round(mod3$coef[3],4),
+                    round(mod1$coef[3],4), round(mod2$coef[3],4), round(mod3$coef[4],4)) ,ncol=5,byrow = FALSE)
+
+colnames(armacoeff) <- c("ar1","ar2","ma1","ma2","drift")
+rownames(armacoeff) <- c("AR(2) ","ARMA(1,1) ","ARMA(1,2) ") 
+armacoeff <- as.table(armacoeff)
+armacoeff
+```
+
+#### (iv) Model checking
+
+We now perform diagnostic checking for the three models. After acknowledging that the results are broadly analogous in the three cases, for brevity reasons we only report the diagnostic output of the AR(2) model.
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 3, fig.width = 6, fig.align = "center"}
+# (iv) Model checking
+# Diagnostic plot for AR(2)
+r1 <- ggtsdiag(mod1) + th +
+  theme(plot.title = element_text(size = 8, face = "plain"))
+# Diagnostic plot for ARMA(1,1)
+r2 <- ggtsdiag(mod2) + th +
+  theme(plot.title = element_text(size = 8, face = "plain"))
+# Diagnostic plot for ARMA(2,1)
+r3 <- ggtsdiag(mod3) + th +
+  theme(plot.title = element_text(size = 8, face = "plain"))
+
+r1
+```
+All models seem to fit very well the data: the residuals look random and show no autocorrelation. The p-values for the Ljung-Box test are all very large.
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE,, fig.height = 1.5, fig.width = 6, fig.align = "center"}
+# Checking normality of the residuals
+
+QQ1 <- qqplot.data(mod1$residuals) + ggtitle("Q-Q Plot AR(2)")  +
+  theme(plot.title = element_text(size = 8, face = "plain"))
+QQ2 <- qqplot.data(mod2$residuals) + ggtitle("Q-Q Plot ARMA(1,1)") +
+  theme(plot.title = element_text(size = 8, face = "plain"))
+QQ3 <- qqplot.data(mod3$residuals) + ggtitle("Q-Q Plot ARMA(1,2)") +
+  theme(plot.title = element_text(size = 8, face = "plain"))
+
+multiplot(QQ1,QQ2,QQ3, cols = 3)
+```
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+#Performing a Shapiro test
+sh1 <- shapiro.test(mod1$res)
+sh2 <- shapiro.test(mod2$res)
+sh3 <- shapiro.test(mod3$res)
+
+pippo <- noquote("Shapiro-Wilk normality test")
+cat(pippo)
+```
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+
+sh <- matrix(c(sh1$statistic, sh2$statistic, sh3$statistic, sh1$p.value, sh2$p.value, sh3$p.value),ncol=3,byrow=TRUE)
+rownames(sh) <- c("W: ","p-value: ")
+colnames(sh) <- c("AR(2)","ARMA(1,1)","ARMA(1,2)") 
+sh <- as.table(sh)
+sh
+```
+
+Both the Q-Q Plot and the Shapiro test provide evidence to reject normality of the residuals. All considered, although clearly non-correlated, the residuals cannot be thought of as a gaussian white noise. 
+This has major implications as regards estimation of the model's parameters, which will ultimately affect also model identification.
+Except for numerical optimization methods, the estimation of all models including a moving average component - in our case, ARMA(1,1) and ARMA(1,2) - is done through MLE or conditional-sum-of-squares (Box and Jenkins, 1976). Both methods rely on the assumption of normality of the errors. 
+This assumption implies that also the forecast errors distribute normally, which, in our case, is clearly at odds with the results of the Shapiro test. 
+Conversely, an AR(2) model can be estimated via classical OLS, which is based on the less restrictive assumption of zero-mean and constant-variance uncorrelated errors. 
+In conclusion, in order to prevent any estimation failure due to incorrect identification assumptions, it seems safer to us to stick to an AR(2) model. The AR(2) estimates obtained via OLS are displayed below.
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+pippoz <- noquote("AR(2), OLS estimates")
+cat(pippoz)
+```
+
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+#Computing the AR(2) parameters via OLS
+mod1_ols <- ar.ols(bpm_38, order.max = 2)
+
+
+ols <- matrix(round(c(mod1_ols$ar, mod1_ols$x.intercept), 4),ncol=3,byrow=TRUE)
+colnames(ols) <- c("ar1","ar2","drift")
+rownames(ols) <- c("Coefficients: ") 
+ols <- as.table(ols)
+ols
+```
+Finally, in order to make a definitive choice between the models, we weigh the contrasting principles of explanatory power and parsimony. We therefore compute the AIC and BIC for the three models.
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+#Computing AIC and BIC for model 1,2 and 3
+
+infocrit <- matrix(c(AIC(mod1),BIC(mod1),AIC(mod2),BIC(mod2),AIC(mod3),BIC(mod3)),ncol=2,byrow=TRUE)
+colnames(infocrit) <- c("AIC","BIC")
+rownames(infocrit) <- c("AR(2)","ARMA(1,1)","ARMA(1,2)") 
+infocrit <- as.table(infocrit)
+infocrit
+```
+
+According to both information criteria, the best model still appears to be an AR(2).
+
+**Point 3**
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 2.5, fig.width = 6.5, fig.align = "center"}
+#Model chosen: AR(2) 
+pred <- predict(mod1_ols,n.ahead=10)
+
+#Confidence interval under normality of errors
+upper <- pred$pred+qnorm(0.975)*pred$se
+lower <- pred$pred-qnorm(0.975)*pred$se
+
+bpm_38_95 <- ts(tracking_data_38_timeadj$bpm)
+bpm_last5 <- window(bpm_38_95,start=end(bpm_38_95)[1]-10)
+
+data2_3_1 <- data.frame(time = time(bpm_38_95),
+                        bpm_38_95 = bpm_38_95,
+                        upper = c(rep(NA,180),upper),
+                        lower = c(rep(NA,180),lower),
+                        forecast = c(rep(NA,180),pred$pred))
+
+p2_3_1 <- ggplot(data2_3_1,aes(x = time)) +
+  geom_line(aes(y = bpm_38_95), colour = "black") +
+  th + 
+  ylab("") + xlab("") +
+  geom_line(aes(y = forecast), colour = "red") +
+  geom_ribbon(aes(ymin=lower, ymax=upper), 
+              alpha=0.3,       
+              linetype=1,      
+              colour="grey70", 
+              size=1,       
+              fill="green") +
+  ggtitle("Data, forecasts, and CI (full period)")
+
+#Lat 5 minutes
+
+data2_3_2 <- data.frame(bpm_last5 = bpm_last5,
+                        time = time(bpm_last5),
+                        upper = c(NA,upper),
+                        lower = c(NA,lower),
+                        forecast = c(NA, pred$pred))
+
+p2_3_2 <- ggplot(data2_3_2,aes(x = time)) +
+  geom_line(aes(y = bpm_last5), colour = "black") +
+  th + 
+  ylab("") + xlab("") +
+  geom_line(aes(y = forecast), colour = "red") +
+  geom_ribbon(aes(ymin=lower, ymax=upper), 
+              alpha=0.3,       
+              linetype=1,      
+              colour="grey70", 
+              size=1,       
+              fill="green") +
+  ggtitle("Data, forecasts, and CI (last 10 min)")
+
+multiplot(p2_3_1,p2_3_2, cols = 1)
+```
+
+The AR(2) model with drift can be expressed as follows:\(y_t=c+\alpha_1y_{t-1}+\alpha_2y_{t-2}\) 
+Accordingly, the resulting forecasts are: 
+
+\(\quad \quad\quad  \quad\quad  \quad\ \hat{y}_{t+1|t}=\hat{c}+\hat{\alpha}_1y_{t}+\hat{\alpha}_2y_{t-1}\) 
+
+\(\quad \quad\quad  \quad\quad  \quad\ \hat{y}_{t+2|t}=\hat{c}+\hat{\alpha}_1 \hat{y}_{t+1}+\hat{\alpha}_2y_{t}\)
+
+\(\quad \quad\quad  \quad\quad  \quad\ \hat{y}_{t+3|t}=\hat{c}+\hat{\alpha}_1 \hat{y}_{t+2}+\hat{\alpha}_2\hat{y}_{t+1}\)
+
+\(\quad \quad\quad  \quad\quad  \quad\ ...\)
+
+\(\quad \quad\quad  \quad\quad  \quad\ \hat{y}_{t+h|t}=\hat{c}+\hat{\alpha}_1 \hat{y}_{t+h-1}+\hat{\alpha}_2\hat{y}_{t+h-2}\)
+
+As regards the shape of the confidence intervals, we notice that they tend to widen as h increases. This feature is consistent with the properties of dynamic forecasting. 
+
+After all, the forecast performance of our model is good. Indeed, all the observed values of bpm over the last 10 periods fall within the 95% confidence interval built around our forecast.
+\newpage
+
+## Exercise 2
+
+**Point 1** 
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 2.5, fig.width = 6.5, fig.align = "center"}
+
+tracking_data_28 <- subset(tracking_data, track_id==28 & time<=7470)
+
+#renormalizing time variable
+time_adj<- (tracking_data_28$time-1800)/30 + 1
+tracking_data_28_timeadj <- subset(tracking_data, track_id==28 & time<=7470) %>%
+  mutate(time=time_adj)
+
+tracking_data_28_timeadj$s <- NULL
+tracking_data_28_timeadj$track_id_seq <- NULL
+
+#plot track 28
+plot_title <-str_c ("Track 28: first 95 minutes")
+
+track_long <-tracking_data_28_timeadj%>%
+  mutate(dfelev=elev-lag(elev))%>%
+  select(-track_id)%>%
+  gather(-time,key="variable",value="value")
+
+ggplot(track_long,aes(x=time, y=value)) +
+  geom_line(aes(colour = variable)) +
+  facet_wrap( ~ variable, ncol=2, scales="free") +
+  ylab("") + xlab("") +
+  th +
+  ggtitle(plot_title)
+```
+
+The plot of track_28 shows both similarities and discrepancies with respect to that of track_38.
+As before, we notice a strong negative correlation between speed and change in elevation. However, dealing with the variable elevation, it is now harder to detect a clear trend component. Again, BPM can be safely assumed to be stationary. 
+
+**Point 2**
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 2.5, fig.width = 6.5, fig.align = "center"}
+
+tracking_data_28_timeadj_90<-subset(tracking_data_28_timeadj, time<=180)
+
+#Creating bpm time-series
+bpm_28_90 <- ts(tracking_data_28_timeadj_90$bpm)
+p2_2_1 <- ggplot(data.frame(time = time(bpm_28_90), bpm_28_90 = bpm_28_90), aes(x = time, y = bpm_28_90)) + geom_line() + th + ggtitle("bpm_28_90")
+
+Dlm_mod<-dlmModPoly(1,dV=10.77, dW=34, m0=140)
+Dlm_28<-dlmFilter(bpm_28_90, Dlm_mod)
+
+listC <- dlmSvd2var(Dlm_28$U.C, Dlm_28$D.C)
+sqrtC <- sqrt(unlist(listC))
+
+#We actually don't need this plot
+p2_2_2 <- ggplot(data.frame(time = time(sqrtC), sd_filter = sqrtC), aes(x = time, y = sqrtC)) + geom_line() + th + ggtitle("Filtering sd State Estimates")
+
+#Filtering estimates and ci
+
+Error<- qnorm(0.975)*sqrtC
+Lower<-Dlm_28$m-Error
+Upper<-Dlm_28$m+Error
+D<-cbind(Lower, Upper)
+
+dataframe_plot_1 <- data.frame(time = c(0,time(bpm_28_90)), filter = Dlm_28$m)
+
+dataframe_plot_1 <- dataframe_plot_1 %>% tail(-1)
+
+dataframe_plot_2 <- data.frame(time = c(0,time(bpm_28_90)), lower = Lower, upper = Upper)
+
+dataframe_plot_2 <- dataframe_plot_2 %>% tail(-1)
+
+dataframe_plot <- data.frame(time = c(0,time(bpm_28_90)), filter = Dlm_28$m, lower = Lower, upper = Upper)
+
+dataframe_plot <- dataframe_plot %>% tail(-1)
+
+p2_2_3 <- ggplot(dataframe_plot, aes(x = time)) +
+  th +
+  ggtitle("Filtering Estimates and Credible Intervals") + 
+  xlab("") + ylab("") +
+  geom_line(aes(y = filter),col = c("red")) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha=0.3, linetype=1, colour="lightgreen", size=0.1,fill="green")
+
+multiplot(p2_2_1, p2_2_3, cols = 1)
+```
+
+The Dynamic Linear Model we are defining (i.e. Random Walk plus Noise) is composed of a bivariate process with only one state equation and one observation equation.  
+
+\(\quad \quad\quad  \quad\quad  \quad y_t=\theta_t+v_t\quad  \quad v_t \sim^{i.i.d}N(0, \sigma^2_v)\quad  \quad \quad  \quad        \quad  \quad\theta_t=\theta_{t-1}+w_t\quad  \quad w_t \sim^{i.i.d}N(o, \sigma^2_w)\)
+
+As observed in class, the filtering estimates can be computed recursively according to the following formula:
+
+\(\quad \quad\quad  \quad\quad  \quad m_{t}=m_{t-1}+\frac{C_{t-1}+{\sigma^2_{w}}}{C_{t-1}+{\sigma^2_{w}}+{\sigma^2_{v}}}(y_{t}-m_{t-1})\quad  \quad\quad \textrm{and}\quad  \quad \quad C_{t}=(C_{t-1}+\sigma^2_{w})-\frac{(C_{t-1}+{\sigma^2_{w})^2}}{C_{t-1}+{\sigma^2_{w}}+{\sigma^2_{v}}}\)
+
+A particular characteristic of the model comes from the analysis of the signal-to-noise ratio, defined as: \(r=\frac{\sigma^2_{w}}{\sigma^2_{v}}\). This has an huge impact on the Kalman Filter: \(K_{t}=\frac{C_{n-1}+{\sigma^2_{w}}}{C_{t-1}+{\sigma^2_{w}}+{\sigma^2_{v}}}\). In other words, the signal-to-noise ratio \(r\) quantifies, through \(k_{t}\), the gain in terms of information carried by the current observation \(y_{t}\) with respect to the previous filtering state estimate \(m_{t-1}\).
+In this case, the estimated signal-to-noise ratio is 3.16. Although \(y_t\) is carrying a smaller variance than \(\theta_t\), our filter \(m_t\) is relying both on the new information \(y_t\) and on the filter of the previous period \(m_{t-1}\), without disproportionate weight being given to one with respect to the other.
+
+**Point 3**
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 3, fig.width = 6.5, fig.align = "center"}
+
+Forecasts<-dlmForecast(Dlm_28, nAhead=10)
+a<-ts(Forecasts$a, start = 181)
+f<-ts(Forecasts$f, start = 181)
+
+#state forecasts
+
+listR<-unlist(Forecasts$R)
+Error_Forecasts_S<-sqrt(listR)
+Upper_S10<-a+qnorm(0.975)*Error_Forecasts_S
+Lower_S10<-a-qnorm(0.975)*Error_Forecasts_S
+
+data_frame_1 <- data.frame(time = time(a), forecast = as.numeric(a), upper = as.numeric(Upper_S10), lower =  as.numeric(Lower_S10), id = rep("state", length(a)))
+
+#Observation forecasts
+
+listQ<-unlist(Forecasts$Q)
+Error_Forecasts_O<-sqrt(listQ)
+Upper_O10<-f+qnorm(0.975)*Error_Forecasts_O
+Lower_O10<-f-qnorm(0.975)*Error_Forecasts_O
+
+data_frame_2<-data.frame(time=time(f), forecast = as.numeric(f), upper=as.numeric(Upper_O10), lower= as.numeric(Lower_O10), id = rep("observation", length(f)))
+
+data_frame_1_2 <- data_frame_1 %>% bind_rows(data_frame_2)
+
+pp1 <- ggplot(data = data_frame_1_2, aes(x = time)) + 
+  fc + CI +th + facet_wrap(~id, ncol = 2) +
+  ggtitle("1 to 10-step ahead forecasts with Credible Intervals")
+
+
+#comparison with one-step ahead forecasts
+
+#State comparison
+
+bpm_28_95 <- ts(tracking_data_28_timeadj$bpm)
+Dlm_mod<-dlmModPoly(1,dV=10.77, dW=34, m0=140)
+Dlm_28_95<-dlmFilter(bpm_28_95, Dlm_mod)
+
+
+listR <- dlmSvd2var(Dlm_28_95$U.R, Dlm_28_95$D.R)
+sqrtR <- sqrt(unlist(listR))
+Upper_1S<-Dlm_28_95$a+qnorm(0.975)*sqrtR
+Lower_1S<-Dlm_28_95$a-qnorm(0.975)*sqrtR
+Upper_1S10<-Upper_1S[181:190]
+Lower_1S10<-Lower_1S[181:190]
+
+data_frame_3<-data.frame(time=time(ts(Dlm_28_95$a[181:190], start = 181)), forecast = as.numeric(Dlm_28_95$a[181:190]), upper=as.numeric(Upper_1S10), lower=as.numeric(Lower_1S10), id = rep("state", length(Upper_1S10)))
+
+#observation comparison
+
+listQ<-sqrtR^2+10.77
+sqrtQ<-sqrt(listQ)
+Upper_1F<-Dlm_28_95$f+qnorm(0.975)*sqrtQ
+Lower_1F<-Dlm_28_95$f-qnorm(0.975)*sqrtQ
+Upper_1F10<-Upper_1F[181:190]
+Lower_1F10<-Lower_1F[181:190]
+
+data_frame_5<-data.frame(time=time(ts(Dlm_28_95$f[181:190], start = 181)), forecast = as.numeric(Dlm_28_95$f[181:190]), upper=as.numeric(Upper_1F10), lower=as.numeric(Lower_1F10), id = rep("observation", length(Upper_1F10)))
+
+data_frame_3_5 <- data_frame_3 %>% bind_rows(data_frame_5)
+
+pp2 <- ggplot(data_frame_3_5, aes(x = time)) +
+  th + fc + CI + ggtitle("1-step ahead forecasts with Credible Intervals") + facet_wrap(~id, ncol = 2)
+
+multiplot(pp1,pp2, cols = 1)
+
+```
+
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, , fig.height = 1.5, fig.width = 6.5, fig.align="center"}
+
+data_frame_4<-data.frame(time=time(a), One_Step_Ahead =as.numeric(Dlm_28_95$a[181:190]), h_Step_Ahead = as.numeric(a), id = rep("state", length(time(a))))
+
+data_frame_6<-data.frame(time=time(f), One_Step_Ahead =as.numeric(Dlm_28_95$f[181:190]), h_Step_Ahead = as.numeric(f), id = rep("observation", length(time(a))))
+
+data_frame_4_6 <- data_frame_4 %>% bind_rows(data_frame_6)
+
+data_frame_4_6_long <- data_frame_4_6 %>%
+  gather(-time,-id, key = "variable", value = "value")
+
+ggplot(data = data_frame_4_6_long, aes(x = time, y = value, colour = variable)) +  geom_line() + th + ggtitle("Recursive 1-step ahead and h-steps ahead forecasts") + facet_wrap(~id, ncol = 2)
+```
+
+
+Generally, we can describe a Dynamic Linear Model as a polynomial model if some conditions are satisfied. Accordingly, we will prove that these conditions hold for the Random Walk plus Noise, defining it as a Polynomial DLM of order one. 
+Hence, according to the definition, given the forecast function: 
+\(f_t(h)= E(Y_{t+h}|Y_{1:t})=\alpha_{t,0}+\alpha_{t,1}h+\alpha_{t,2}h^2+...+\alpha_{t,n-1}h^{n-1}\) (where the \(\alpha_{t,j}\)s are linear functions of \(m_t=E(\theta_t|Y_{1:t})\)), those models that present such forecast function are called Polynomial DLMs of order n. 
+
+In our case, let us try to define our forecast function and, thus, let us define recursively the h-step ahead forecasts. 
+We can start from the \(t-{th}\) period assuming the classic filtering distribution, defined as follows
+
+\(\quad \quad\quad  \quad\quad  \quad\theta_{t}|Y_{1:t} \sim N(m_t,C_t)\)
+
+thus, we can proceed by forecasting both for state and observation processes 
+
+\(\quad \quad\quad  \quad\quad  \quad\theta_{t+1}|Y_{1:t} \sim N(a_{t+1},R_{t+1})\quad \textrm{where} \quad a_{t+1}=m_t\quad \textrm{and} \quad R_{t+1}=C_t+\sigma^2_w\)
+
+\(\quad \quad\quad  \quad\quad  \quad Y_{t+1}|Y_{1:t} \sim N(f_{t+1},Q_{t+1})\quad \textrm{where} \quad f_{t+1}=a_{t+1}=m_t\quad\textrm{and} \quad Q_{t+1}=R_{t+1}+\sigma^2_v=C_t+\sigma^2_w+\sigma^2_v\)
+
+Proceeding until h-step ahead, we can obtain 
+
+\(\quad \quad\quad  \quad\quad  \quad\theta_{t+h}|Y_{1:t} \sim N(a_{t+h},R_{t+h})\quad \textrm{where} \quad a_{t+h}=m_t\quad \textrm{and} \quad R_{t+h}=C_t+h\sigma^2_w\)
+
+\(\quad \quad\quad  \quad\quad  \quad Y_{t+h}|Y_{1:t} \sim N(f_{t+h},Q_{t+h})\quad \textrm{where} \quad f_{t+h}=a_{t+h}\quad \textrm{and} \quad Q_{t+h}=R_{t+h}+\sigma^2_v=C_t+h\sigma^2_w+\sigma^2_v\)
+
+Finally, as mentioned above, the process can be defined as a polynomial DLM of order 1, since
+
+\(\quad \quad\quad  \quad\quad  \quad f_t(h)= \alpha_{t,0}= E(\theta_t|Y_{1:t})=m_t\)
+
+At this point, it seems clear that the h-step ahead state and observation forecasts are evolving constantly based on the last available filtered value \(m_t\). Since we are not able to update our information period by period, uncertainty connected to each successive prediction increases. Thus, credible intervals, for both state and observation forecasts, get larger as h increases.
+
+A different scenario arises in the case of the 1-step ahead model, obtained by fitting a DLM model on the overall sample of 95 minutes. Now, the set of observation and state forecasts is more flexible, since we are updating them every time a new observation becomes available. Besides, their confidence interval remain stable, in terms of width, over time. 
+Before proceeding with a comparison between 1-step ahead and h-step ahead predictions, we can recover the more general forecasting procedure for the one-step ahead model, starting, as before, from the last filtering distribution at time \(t\). Thus, 
+
+\(\quad \quad\quad  \quad \theta_{t}|Y_{1:t} \sim N(m_t,C_t)\) 
+
+the forecasting process can be expressed in the following recursive way:
+
+\(\quad \quad\quad  \quad\theta_{t+1}|Y_{1:t} \sim N(a_{t+1},R_{t+1})\quad \quad a_{t+1}=G_{t+1}m_{t}=m_t\quad \quad R_{t+1}=G_{t+1}C_{t}G^\intercal_{t+1}+W_{t+1}=C_t+\sigma^2_w\)
+
+\(\quad \quad\quad  \quad Y_{t+1}|Y_{1:t} \sim N(f_{t+1},Q_{t+1})\quad \quad f_{t+1}=F_{t+1}a_{t}=a_t\quad \quad Q_{t+1}=F_{t+1}R_{t+1}F^\intercal_{t+1}+V_{t+1}=R_{t+1}+\sigma^2_v\)
+
+until
+
+\(\quad \quad\quad  \quad\theta_{t+h}|Y_{1:t+h-1} \sim N(a_{t+h},R_{t+h})\quad \quad a_{t+h}=m_{t+h-1}\quad \quad R_{t+h}=C_{t+h-1}+\sigma^2_w\)
+
+\(\quad \quad\quad  \quad Y_{t+h}|Y_{1:t+h-1} \sim N(f_{t+h},Q_{t+h})\quad \quad f_{t+h}=F_{t+1}a_{t}=a_{t+h}=m_{t+h-1}\quad \quad Q_{t+h}=R_{t+h}+\sigma^2_v\)
+
+As we can observe, the updating process proposes an evolution in both point forecasts and credible intervals. The upcoming information at every new period \(t+j\), gives the possibility of computing a new Kalman Filter for that particular period. Updating the filtering period, we are enlarging the set of information that Kalman Filter is recursively considering, which allows to ameliorate our prediction.
+  Based on the formulae and motivation showed, we can observe how the one-step ahead model proposes state point-forecasts and observation point-forecasts that are identical to each other, period by period (i.e. from 181 to 190 observation). That is to say, point forecasts for both state and observation processes are equal to the previous-time filtering estimate. 
+  At this point, we can proceed with the comparison between the forecasts of the one and h-step ahead models. First of all, the graph comparing observation forecasts between the two models is identical to the one comparing state forecasts. 
+  Accordingly, for the first model, forecasts - both state and observation - start by defining  \(f_{t+1}=a_{t+1}=m_t\) (with t=180) and proceed until \(f_{t+10}=a_{t+10}=m_{t+9}\) (with t+10=190). By contrast, for the second model, we are starting from \(f_{t+1}=a_{t+1}=m_t\) (i.e. t=180) and forecasts (both state and observation) remain constant at the same level for the next 10-step ahead periods.
+
+**Point 4**
+
+We repeat points 1 and 3 for track #62.
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 2.5, fig.width = 6.5, fig.align = "center"}
+
+tracking_data_62 <- subset(tracking_data, track_id==62 & time<=7470)
+
+#renormalizing time variable
+tracking_data_62_timeadj <- subset(tracking_data, track_id==62 & time<=7470) %>%
+  mutate(time=time_adj)
+
+tracking_data_62_timeadj$s <- NULL
+tracking_data_62_timeadj$track_id_seq <- NULL
+
+#plot track 62
+plot_title <-str_c ("Track 62: first 95 minutes")
+
+track_long <-tracking_data_62_timeadj%>%
+  mutate(dfelev=elev-lag(elev))%>%
+  select(-track_id)%>%
+  gather(-time,key="variable",value="value")
+
+ggplot(track_long,aes(x=time, y=value, colour = variable)) +
+  geom_line() +
+  facet_wrap( ~ variable, ncol=2, scales="free") +
+  ylab("") + xlab("") +
+  th +
+  ggtitle(plot_title)
+
+```
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 1.5, fig.width = 6, fig.align = "center"}
+#state forecasts
+
+tracking_data_62_timeadj_90<-subset(tracking_data_62_timeadj, time<=180)
+
+bpm_62 <- ts(tracking_data_62_timeadj_90$bpm)
+
+ggplot(data.frame(time = time(bpm_62), bpm_62 = bpm_62), aes(x = time, y = bpm_62)) + geom_line() + th + ggtitle("bpm_62")
+
+```
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 3, fig.width = 6, fig.align = "center"}
+
+Dlm_mod<-dlmModPoly(1,dV=0.1, dW=10, m0=140)
+Dlm_62<-dlmFilter(bpm_62, Dlm_mod)
+
+#One to 10 s-a
+
+Forecasts1<-dlmForecast(Dlm_62, nAhead=10)
+a1<-ts(Forecasts1$a, start = 181)
+f1<-ts(Forecasts1$f, start = 181)
+
+listR1<-unlist(Forecasts1$R)
+Error_Forecasts_S1<-sqrt(listR1)
+Upper_S10<-a1+qnorm(0.975)*sqrt(Error_Forecasts_S1)
+Lower_S10<-a1-qnorm(0.975)*sqrt(Error_Forecasts_S1)
+
+listQ1<-unlist(Forecasts1$Q)
+Error_Forecasts_O1<-sqrt(listQ1)
+Upper_O10<-f1+qnorm(0.975)*sqrt(Error_Forecasts_O1)
+Lower_O10<-f1-qnorm(0.975)*sqrt(Error_Forecasts_O1)
+
+data_frame_6_2<-data.frame(time = time(a1), forecast = as.numeric(a1), upper=as.numeric(Upper_S10), lower=as.numeric(Lower_S10),  id = rep("state",length(time(a1))))
+
+data_frame_7<-data.frame(time = time(f1), forecast = as.numeric(f1), upper=as.numeric(Upper_O10), lower=as.numeric(Lower_O10), id = rep("observation",length(time(f))))
+
+data_frame_6_7 <- data_frame_6_2 %>% bind_rows(data_frame_7)
+
+ppp1 <- ggplot(data_frame_6_7, aes(x = time)) +
+  fc + CI + th + facet_wrap(~id, ncol = 2) +
+  ggtitle("1-10 step ahead forecasts with Credible Intervals")
+
+
+#comparison with one-step ahead forecasts
+#State comparison
+
+bpm_62_1 <- ts(tracking_data_62_timeadj$bpm)
+Dlm_mod<-dlmModPoly(1,dV=0.1, dW=10, m0=140)
+Dlm_62_1<-dlmFilter(bpm_62_1, Dlm_mod)
+
+listR <- dlmSvd2var(Dlm_62_1$U.R, Dlm_62_1$D.R)
+sqrtR <- sqrt(unlist(listR))
+Upper_1S<-Dlm_62_1$a+qnorm(0.975)*sqrtR
+Lower_1S<-Dlm_62_1$a-qnorm(0.975)*sqrtR
+Upper_1S10<-Upper_1S[181:190]
+Lower_1S10<-Lower_1S[181:190]
+
+data_frame_8<-data.frame(time=time(a), forecast = as.numeric(Dlm_62_1$a[181:190]), upper= as.numeric(Upper_1S10), lower=as.numeric(Lower_1S10), id = rep("state", 10))
+
+#observation comparison
+
+listQ<-sqrtR^2+10.77
+sqrtQ<-sqrt(listQ)
+Upper_1F<-Dlm_62_1$f+qnorm(0.975)*sqrtQ
+Lower_1F<-Dlm_62_1$f-qnorm(0.975)*sqrtQ
+Upper_1F10<-Upper_1F[181:190]
+Lower_1F10<-Lower_1F[181:190]
+
+data_frame_10<-data.frame(time=time(f), forecast = as.numeric(Dlm_62_1$f[181:190]), upper = as.numeric(Upper_1F10), lower = as.numeric(Lower_1F10), id = rep("observation", 10))
+
+data_frame_8_10 <- data_frame_10 %>% bind_rows(data_frame_8)
+
+ppp2 <- ggplot(data_frame_8_10, aes(x = time)) +
+  ggtitle("1-step ahead forecasts with Credible Intervals") +th + fc + CI + facet_wrap(~id, ncol = 2)
+
+multiplot(ppp1,ppp2, cols = 1)
+
+```
+
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 2, fig.width = 6.5, fig.align="center"}
+
+data_frame_9<-data.frame(time=time(a1), One_step_ahead = as.numeric(Dlm_62_1$a[181:190]), h_step_ahead = as.numeric(a1), id = rep("state", 10))
+
+data_frame_11<-data.frame(time=time(f1), One_step_ahead = as.numeric(Dlm_62_1$f[181:190]), h_step_ahead = as.numeric(f1), id = rep("observation", 10))
+
+data_frame_9_11 <- data_frame_9 %>% bind_rows(data_frame_11)
+
+data_frame_9_11_long <- data_frame_9_11 %>%
+  gather(-time,-id, key = "forecast", value = "value")
+
+ggplot(data_frame_9_11_long, aes(x = time, y = value)) + th +
+  facet_wrap(~id, ncol = 2) +
+  ylab("") + xlab("") +
+  geom_line(aes(colour = forecast)) +
+  ggtitle("Recursive 1-step ahead and h-step ahead forecasts")
+
+```
+Finally, based on the results of points 2 and 3, we can draw some general remarks on h-step ahead vs recursive 1-step ahead forecasts in the case univariate models. As already shown in detail, the h-step ahead forecasts (both for states and observations) evolve constantly based on the last filtered value:
+
+\(\quad \quad\quad  \quad\quad  \quad\ f_{t+h}=a_{t+h}=m_t\) with \(h=1, ...,10\)
+
+Therefore, differently from recursive 1-step ahead forecasting, any changes in parameters (e.g. \(\theta_t\) and potentially also \(\sigma^2_v\) and \(\sigma^2_w\) ) that might occur within the time interval \(t+1,...,t+10\) will not be taken into account by the correseponding h-step ahead forecasts, i.e. \(f_{t+2},...,f_{t+10}\). This feature, together with the fact that credible intervals for h-step ahead forecasts increase  with \(h\), lead us to the conclusion that, whenever available, recursive 1-step ahead forecasts should be preferred to their h-step ahead counterparts. 
+
+Having said that, if we are in a case other than streaming data, and recursive forecasting is not feasible, h-step ahead forecasting remains the one and only method to be applied. In this last scenario (which, yet, is not the case in this project), it is essential to check for the stability of the parameters.
+
+In conclusion, it is worth mentioning that running an ADF test on the stationarity of the last 5 minutes of time-series BPM for track 28, we do not reject the null hypothesis of non-stationarity at the 5% significance level. In a sense, this result confirms the risk of forecast failure due to parameter instability in the case of h-step ahead forecasting.
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+#Creating bpm time-series for the last 5 minutes
+tracking_data_28_timeadj_last_5min<-subset(tracking_data_28_timeadj, time>=180)
+bpm_28_last_5min <- ts(tracking_data_28_timeadj_last_5min$bpm)
+
+#Checking stationarity of bpm in the last 5 minutes
+adf.test(bpm_28_last_5min)
+
+```
+
+## Exercise 3
+
+**Point 1**
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+tracking_data_62 <- subset(tracking_data, track_id==62 & time<=7470)
+
+#renormalizing time variable
+time_adj<- (tracking_data_62$time-1800)/30 + 1
+tracking_data_62_timeadj <- subset(tracking_data, track_id==62 & time<=7470) %>%
+  mutate(time=time_adj)%>%
+  mutate(dfelev=elev-lag(elev))
+
+tracking_data_62_timeadj$s <- NULL
+tracking_data_62_timeadj$track_id_seq <- NULL
+
+```
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 2.5, fig.width = 6.5, fig.align = "center"}
+#plot track 62
+plot_title <-str_c("Track 62")
+
+track_long <-tracking_data_62_timeadj%>%
+  mutate(dfelev=elev-lag(elev))%>%
+  select(-track_id)%>%
+  gather(-time,key="variable",value="value")
+
+ggplot(track_long,aes(x=time, y=value, colour = variable)) +
+  geom_line(aes()) +
+  facet_wrap( ~ variable, ncol=2, scales="free") +
+  ylab("") + xlab("") +
+  th +
+  ggtitle(plot_title)
+```
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+#Leave aside the last 5 minutes
+tracking_data_62_timeadj_90<-subset(tracking_data_62_timeadj, time<=180)
+
+#Creating bpm time-series
+bpm_62_90 <- ts(tracking_data_62_timeadj_90$bpm)
+dfelev_62_90<-ts(tracking_data_62_timeadj_90$dfelev)
+TS_62_90<-cbind(bpm_62_90,dfelev_62_90)
+bpm_62_95 <- ts(tracking_data_62_timeadj$bpm)
+dfelev_62_95<-ts(tracking_data_62_timeadj$dfelev)
+TS_62_95<-cbind(bpm_62_95, dfelev_62_95)
+```
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+#Estimating the model 
+linear_1<-lm(bpm_62_90~dfelev_62_90)
+res<-ts(linear_1$residuals)
+```
+
+OLS estimates properties of unbiasedness and consistency require three assumptions to hold: 
+ 
+- LRM (1) linearity of the model 
+- LRM (2) full column rank of the explanatory variable matrix 
+- LRM (3) the expected value of errors conditioned of the explanatory variable is 0.
+ 
+We may safely assume that the first two hypotheses are respected, given the theoretical formulation of the model. We have only one regressor that is varying over time and thus not perfectly collinear with the constant term. As for the third hypothesis, we cannot totally exclude the risk of endogeneity due to omitted varable bias. Nonetheless, we proceed with the analysis assuming that LRM(3) holds. 
+
+Furthermore, it is worth checking if also other two properties of the linear regression model hold, namely:
+
+- LRM (4) Homoskedasticity of errors given explanatory variables 
+- LRM (5) Normality of errors given explanatory variables.
+
+These two properties are essential in order to define the finite sample distribution properties of the estimators.
+
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+#Checking residuals normality and properties
+shapiro.test(res)
+```
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, , fig.height = 1.5, fig.width = 6, fig.align = "center"}
+
+residuals <-data.frame(time = time(res), residuals = res)
+
+res_p <- ggplot(residuals, aes(x = time, y = residuals)) + th + geom_line() +ggtitle("Residuals")
+
+#Q-Q Plot using the previously defined function
+qq_res <- qqplot.data(res)
+
+multiplot(res_p, qq_res, cols = 2)
+```
+
+
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, , fig.height = 2, fig.width = 6,  fig.align = "center"}
+
+par(mfrow = c(1, 2), mar = c(3, 5, 4, 4), cex = 0.4)
+ACF <- acf(res, lag.max = 20, main = "ACF", plot = FALSE)
+PACF <- acf(res, lag.max = 20, type = "partial", main = "Partial ACF", plot = FALSE)
+
+confidence_band_value <- -qnorm(1- 0.975)/sqrt(length(res))
+upper = rep.int(confidence_band_value, 7)
+lower = rep.int(-confidence_band_value, 7)
+
+acf_dataframe <- data.frame(lag = ACF$lag, acf = ACF$acf, pacf = c(NA,PACF$acf), lower, upper)
+
+acf_dataframe_long <- acf_dataframe %>% 
+  gather(key = "variable", value = "value",-lag,-lower,-upper)
+
+ggplot(acf_dataframe_long, aes(x = lag, y = value)) +
+  th + ggtitle("ACF and PACF for residuals") +
+  geom_bar(aes(fill = variable), stat = "identity", width = 0.3)+
+  ylab("") + xlab("") +
+  facet_wrap( ~ variable, ncol=2) +
+  geom_line(aes(y = lower), linetype = "dashed") +
+  geom_line(aes(y = upper), linetype = "dashed")+
+  theme(legend.position = "none")
+
+```
+
+As we can observe, residuals seem to be correlated over the sample, which does not allow us to easily estimate coefficient variances through OLS approach. Instead, a more sophisticated analysis, via F-GLS or HAC, is required. 
+In addition, also LRM (5) is violated, meaning that the finite sample distribution of the OLS coefficients is apparently not normal. In order to implement significance tests (e.g. T-test, F-test) we must rely on asymptotic distributions. 
+At a later point, we can properly solve previous concerns through HAC or F-GLS estimation techniques. However, for the purposes of point forecasting we can continue to rely just on the LRM-1)-LRM-3) properties.
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 2.5, fig.width = 6,  fig.align = "center"}
+
+coeff<-linear_1$coefficients
+dfelev_62_coeff<-coeff[2:2]
+const<-coeff[1:1]
+bpm_pred<-const+dfelev_62_coeff*dfelev_62_95
+
+data_frame_12 <- data.frame(time = time(bpm_62_95), bpm_62_95 = as.numeric(bpm_62_95), forecast = as.numeric(bpm_pred))
+
+data_frame_12_long <- data_frame_12 %>% gather(-time, key = "variable", value = "value")
+
+data_frame_13 <- data.frame(time = time(bpm_62_95[181:190]), bpm_62_95_last_10 = as.numeric(bpm_62_95[181:190]), forecast = as.numeric(bpm_pred[181:190]))
+
+data_frame_13_long <- data_frame_13 %>% gather(-time, key = "variable", value = "value")
+
+plt_1 <- ggplot(data_frame_12_long, aes(x = time, y = value, colour = variable)) + geom_line() + th + ylab("") + xlab("") + ggtitle("Data and Predictions")
+
+plt_2 <- ggplot(data_frame_13_long, aes(x = time, y = value, colour = variable)) + geom_line() + th + ylab("") + theme(legend.position = "none")
+
+multiplot(plt_1,plt_2, cols = 1)
+```
+
+In order to evaluate the predictive performance of the model we check whether a white noise process can be fitted to the residuals. 
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, , fig.height = 1.5, fig.width = 6, fig.align = "center"}
+for_err<-ts(bpm_62_95-bpm_pred)
+ACF <- acf(for_err[2:190], lag.max=20, main = "Forecast errors correlogram", plot = FALSE)
+
+confidence_band_value <- -qnorm(1- 0.975)/sqrt(length(for_err))
+upper = rep.int(confidence_band_value, 7)
+lower = rep.int(-confidence_band_value, 7)
+
+acf_dataframe <- data.frame(lag = ACF$lag, acf = ACF$acf, lower, upper)
+
+ggplot(acf_dataframe, aes(x = lag, y = acf)) +
+  th + ggtitle("Forecast errors correlogram") +
+  geom_bar(stat = "identity", width = 0.3, fill = "lightblue") +
+  ylab("") + xlab("") +
+  geom_line(aes(y = lower), linetype = "dashed") +
+  geom_line(aes(y = upper), linetype = "dashed")
+
+```
+
+Looking at the correlogram of forecast errors, we notice that forecast errors are correlated over time, suggesting that the model is not performing well. 
+
+\(\beta_1\) can be defined as the variation of bpm associated to a one-meter variation in altitude. A static linear regression model assumes the stability of these parameters all over the sample. However, we are led to approach the idea that the mentioned assumption might be too restrictive.
+
+The model we have fitted measures a linear relationship between change in elevation and bpm. Particularly, let us consider the first of the two. Obviously, some major determinants of the fatigue of a cyclist are the slope of the route and the length of the slope itself. For instance, we can assume that the longer a cyclist is subject to a positive slope, the greater the fatigue she accumulates. This first example is suggesting the presence of a non-linear relationship between the variables. 
+In other words, suppose that from \(t-1\) to \(t\) the individual climbs 1 meter in elevation. In this case we are assuming that the impact on bpm is \(\beta_1\). Let us also suppose that the same individual, travels 3 meters in elevation from  period \(t\) to \(t+3\). The individual has climbed 3 times the elevation she had climbed from \(t-1\) to \(t\), but now she has done it in 4 successive periods. This is likely to add extra burden on the individual's fatigue. However, applying the model in question, we would expect heart rate at period \(t+3\) (i.e. \(y_{t+3}\)) to be exactly the same as the heart rate at period \(t\) (i.e.\(y_t\)). Thus
+
+\(\quad \quad\quad  \quad\quad  \quad y_{t}=\beta_0+\beta_1x_{t}\)   supposing \(x_t=1 \Longrightarrow y_{t}=\beta_0+\beta_1\)
+
+Now let us predict $y_{t}$ from \(t\) to \(t+3\) recursively, supposing \(x_j=1\) \(\forall j \in [t+1, t+3]\)
+
+\(\quad \quad\quad  \quad\quad  \quad\ y_{t+1}=\beta_0+\beta_1x_{t+1}=\beta_0+\beta_1\)
+
+\(\quad \quad\quad  \quad\quad  \quad\ y_{t+2}=\beta_0+\beta_1x_{t+2}=\beta_0+\beta_1\)
+
+\(\quad \quad\quad  \quad\quad  \quad\ y_{t+3}=\beta_0+\beta_1x_{t+3}=\beta_0+\beta_1\)
+  
+This is clearly unrealistic since heart rate, even if eventually converging to a maximum value, should reach higher frequencies after prolonged climb than after a simple 30-second slope. Nevertheless, a static regression model is not able to capture this difference.
+
+Moreover, with regard to the stability of the parameters, while assuming the linearity of the model, we can advance another simple counterexample to refute the initial hypothesis. Suppose you can face the same climb, with the same speed from time 0 to time 1, or from time \(t+k-1\) to time \(t+k\) with \(k>1\) and \(t>0\). It seems obvious that the effort required to the subject to face the climb at the beginning of the ride is less than the effort required for the next interval. This is simply due to the fact that from period 1 to period \(t+k-1\) the subject has has already been riding, therefore has already accumulated fatigue. In this way the effect on bpm for the climb from 0 to 1 will be lower than the effect of facing the same climb at the same speed from \(t+k-1\) to \(t+k\).
+
+Lastly, it is worth noticing that even the very relation between fatigue and bpm is unlikely to be linear. Conversely, it would be more plausible to imagine bpm as a function of fatigue, increasing but at a decreasing rate. 
+
+As for the model's pros, one advantage of implementing a simple linear regression model is the simplicity of the model. Compared to a DLM, in fact, the level of complexity, intended primarily as the number of parameters to be estimated, is significantly lower. In this terms, linear models are approached to be very consistent and easily manageable (Angrist and Pishke, 2008). Contrastingly, we need to estimate the exact Conditional Expectation Function and not approximate it wrongly (Sims, 2010).
+
+**Point 2**
+
+```{r comment=NA, comment=NA, echo = FALSE, message = FALSE, warning = FALSE, include= FALSE}
+buildModReg <- function(v) {
+  dV <- exp(v[1])
+  dW <- c(exp(v[2]),exp(v[3]))  
+  dlmModReg(dfelev_62_90[2:180], addInt = TRUE, dV = dV, dW = dW)
+}
+VarGuess <- var(diff(bpm_62_90), na.rm = TRUE)
+parm <- c(log(VarGuess), log(VarGuess/5),log(VarGuess/5))
+mle <- dlmMLE(bpm_62_90[2:180], parm = parm, build = buildModReg)
+if (mle$convergence != 0) stop(mle$message)
+dlmReg <- buildModReg(mle$par)
+dlmFilt<-dlmFilter(bpm_62_90[2:180], dlmReg)
+list(unlist(dlmReg$W))
+list(unlist(dlmReg$V))
+```
+
+\(\quad \quad\quad  \quad\quad  \quad\ \widehat{W}=\begin{bmatrix}
+     \ 23.18661      & \ 0 \\
+    \ 0      & \ 0.04470154 \\
+\end{bmatrix}\quad \textrm{and} \quad \hat{\sigma}^2=1.92971e-08 \)
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 1.5, fig.width = 6,  fig.align = "center", include = FALSE}
+dlmSm <- dlmSmooth(dlmFilt)
+
+data_frame_14 <- data.frame(time = time(ts(unlist(dlmSm))), smoother = ts(unlist(dlmSm)))
+
+#don't need this plot
+
+ggplot(data_frame_14, aes(x = time, y = smoother)) +
+  th + geom_line() + ggtitle("Kalman Smoother Estimates")
+```
+As we can observe, the two processes of Smoothing and Forecasting for observations, are diametrically opposed. The first one is reling on Backward Smothing and the second one on Foreward Forecast.
+As we have described in previous assignments, we can observe how forecasts for a Random Walk plus noise model and their variances relies on the following formula:
+
+\(\quad \quad\quad  \quad\quad  \quad E(Y_t|Y_{1:t-1})=f_t=m_{t-1}\)
+ 
+\(\quad \quad\quad  \quad\quad  \quad\ Var(Y_t|Y_{1:t-1})=Q_t=C_{t-1}+\sigma^2_w+\sigma^2_v\)
+
+At this point, we can focus on the smoothing process, that starting at T, the last period of our dataset, with 
+
+\(\quad \quad\quad  \quad\quad  \quad E(\theta_T|Y_{1:T})=s_T=m_T\)
+
+\(\quad \quad\quad  \quad\quad  \quad E(\theta_s|Y_{1:T})= s_t= m_t+C_tG{'}_{t+1}R_{t+1}^{-1}(s_{t+1}-a_{t+1})\)
+
+where its variances are
+
+\(\quad \quad\quad  \quad\quad  \quad\ Var(\theta_T|Y_{1:T})=S_T=C_T\)
+
+\(\quad \quad\quad  \quad\quad  \quad\ Var(\theta_s|Y_{1:T})= S_t= C_t-C_tG{'}_{t+1}R_{t+1}^{-1}(R_{t+1}-S_{t+1})R_{t+1}^{-1}G{'}_{t+1}C_t\)
+
+where, in this model \(G_t=1\)
+
+Finally, it is interesting to observe that smoothing estimates are actually smoother than filtering estimates. This is generally true, since the smoothing process is relying on a wider set of information. 
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 2.5, fig.width = 6.5,  fig.align = "center"}
+listS <- dlmSvd2var(dlmSm$U.S, dlmSm$D.S)
+S0<-c()
+S1<-c()
+for (i in 1:length(listS)){
+  S0[i]<-listS[[i]][1,1]
+  S1[i]<-listS[[i]][2,2]
+}
+s0<-dlmSm$s[,1]
+s1<-dlmSm$s[,2]
+#Computing square roots
+
+sqrtS0 <- sqrt(S0)
+sqrtS1 <- sqrt(S1)
+
+#Defining the 90% credible interval for the smoother
+
+ErrorS0 <- qnorm(0.97525)*sqrtS0
+ErrorS1 <- qnorm(0.97525)*sqrtS1
+
+LowerS0 <- s0 - ErrorS0
+UpperS0 <- s0 + ErrorS0
+
+LowerS1 <- s1 - ErrorS1
+UpperS1 <- s1 + ErrorS1
+
+#First PLOT
+data_bs0 <- data.frame(time = time(s0), smoother = s0, lower = LowerS0, upper = UpperS0, id = rep("constant", length(s0)))
+
+#Second PLOT
+data_bs1 <- data.frame(time = time(s1), smoother = s1, lower = LowerS1, upper = UpperS1, id = rep("slope", length(s1)))
+
+data_bs0_bs1 <- data_bs0 %>% 
+  bind_rows(data_bs1)
+
+ggplot(data_bs0_bs1, aes(x = time, y = smoother)) +
+  facet_wrap(~id, ncol = 2, scales = "free") + th + geom_line(colour = "red") + ggtitle("Smoothing Estimates and Credible Intervals") + CI
+```
+
+The process we are fitting presents some important chatacteristics. Firstly, when we fit a dlm regression model, the variance for the observation process is almost 0. This is suggesting that everything of the obervation process is perfectly explained by the bivariate state process we are taking into consideration. Thus, every observation \(y_t\) and so the BPM level at time \(t\) is perfectly predicted by the process \(\beta_{0t}+\beta_{1t}x_t\).
+The first of the two state processes is defined for the constant \(\beta_{0t}\). Observing its smoothing estimates, and so the overall state trajectory from \(t=1\) to \(t=180\), we can denote how the credible interval is alternatively widening and restricting with respect to the smoothing point estimate. Specifically, we can notice how credible intervals shrink in correspondence of very low values of BPM. In this case the uncertainty relative to the smooting estimate is really low, both in statistical and in relevance terms. 
+Interestingly, we can compare the \(\beta_{0t}\) trajectory with the BPM trajectory from \(t=1\) to \(t=180\). We can notice how the two trends are very similar, especially in case of low peaks. This is suggested by the fact that every time the individual is on a downhill, the effect that the change in elevation has on bpm becomes less relevant, as we will see later, and more weight is given to the authomatic resting and recovering process carried by the constant term. As previously mentioned, in this dynamic dimension the constant can assume the role of an accumulator of fatigue, increasing during prolonged upward slopes. 
+Thus, in some periods, like the 25th or from 100th to 110th, and so in correspondence of steep downhils, the constant decreases dramatically with respect to its mean value of 149.
+Finally, the overall trajectory of \(\beta_{0t}\) results to be strongly relying on the \(y_t\) path. Accordingly, the Kalman Smoother is giving very large weight to the observation at each time. 
+
+Differently, for the slope $\beta_{1t}$, we can claim different results in terms of stability and uncertainty. As matter of fact, \(\beta_{1t}\) seems to predict relatively badly the effect that the difference in elevation has on bpm. In more practical terms, we can focus on the credible intervals affecting smoothing point estimates of the slope. In some periods the credible interval shrinks on the point estimates, while in other periods it becomes as large as a variation of 100% (up or down) of the point estimate. Hence, those periods in which \(\beta_{1t}\) seems to be less uncertain, correspond to more volatile \(dfelev\). In other words, \(\beta_{1t}\) better succeeds in capturing the effect that \(x_t\) has on \(y_t\) during the periods in which the difference in elevation changes continuosly and with consistent slope variation.
+In other words, we are suggesting that our "slope process" is more certain in those cases in which dfelev varies more. Contrastingly, in those periods during which dfelev seems to be constant at a fixed value (e.g. from \(t=25\) to \(t=90\)) and shows incosistent and small elevation changes, the credible interval of \(\beta_{1t}\) smoothing process enlarges.
+
+However, overall, our process shows improvements in terms of estimation and prediction performances. On avarage the \(\beta_{0t}\) process defines a smoothing estimates that is consistent with the one predicted by the linear model. This intuition relies on the fact that by its very econometrical nature, the constant of the linear model is estimated as the sample mean of the observations. Nevertheless, as previously explained, the \(\beta_{0t}\) smoothing values are undergoing the avarage value, suggesting resting periods. 
+Differently, both the estimated slope in linear model and the \(\beta_{1t}\) process seem to have lower relevance in relative terms. However, even if, on avarage, \(\beta_{1t}\) smoothing estimates are lower than the slope estimated in the linear model, the former are very volatile, especially in presence of downhills, where the smoothing estimates become lower than 1.
+
+
+**Point 3**
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 1.5, fig.width = 6,  fig.align = "center"}
+#defining forecasts
+
+y_forecast<-s0[180]+s1[180]*dfelev_62_95[181:190]
+
+ggplot(data.frame(time = time(y_forecast), forecast = y_forecast), aes(x = time, y = forecast)) + geom_line() + th + ggtitle("Forecasts")
+```
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE}
+#define forecast errors
+
+for_err2<-bpm_62_95[181:190]-y_forecast
+MAPE2<-sum(abs(for_err2)/bpm_62_95[181:190])
+
+MAPE1<-sum(abs(for_err[181:190])/bpm_62_95[181:190])
+
+mapez <- matrix(c(MAPE1, MAPE2),ncol=1,byrow=TRUE)
+colnames(mapez) <- c("MAPE")
+rownames(mapez) <- c("Model 1: ", "Model 2: ") 
+mapez <- as.table(mapez)
+mapez
+```
+
+Finally, it seems clear that the dynamic linear model we are estimating is better in terms of forecasting precision. Accordingly, by computing the Mean Avarage Percentage Forecast Errors from \(t=181\) to \(t=190\) for both the linear model and the DLM one, the former is defining a greater MAPE than the latter, where MAPE is defined as 
+
+\(\quad \quad\quad  \quad\quad  \quad \sum^H_{h=1} \frac{|e_{t+h}|}{y_{t+h}}\)
+
+\newpage
+
+**Point 4**
+
+```{r comment=NA, echo = FALSE}
+library(dlm)
+library(magrittr)
+library(tidyverse) 
+
+# load the raw dataset
+
+file_name <- "tracking_data_start=30min_record=120min_freq=30sec.csv"
+all_tracks_data <- read.delim(file_name) %>%
+as.tibble()
+np <- 10
+which_track <- 43 # this is our usual track_seq = 62
+
+```
+
+The first part of the code loads the usual libraries we used throughout the course and loads the raw dataset, tranforming it into tibble format.
+It then stores the value 43 in the which_track variable. This variable will let us select the track 62 in the next code chunck for further analysis.
+
+```{r comment=NA, echo = FALSE}
+
+all_tracks_repli <- all_tracks_data %>%
+select(-s, -track_id_seq) %>%
+group_by(track_id) %>%
+mutate(dfelev = elev-lag(elev),
+time = time-min(time)) %>%
+ungroup() %>% select(track_id, time, bpm, dfelev)
+
+```
+
+Moving on, the code stores new variable called all_tracks_repli. It starts from the all_tracks_data dataframe, it then removes the "s" and the "track_id_seq" columns because they are useless for our purposes. Then it groups the dataset by the track_id: this is done so that the next operations will be performed "by group" and not by the whole dataset. After that, it creates the dfelev variable, which is a first difference of the elev variable, and modifies time variable, subtracting the minimum to each datapoint so that it starts off from zero. Then, the dataset is ungrouped and we keep only four variables: track_id, time, bpm and dfelev.
+
+```{r comment=NA, echo = FALSE}
+
+bpm_all <- all_tracks_repli %>% select(-dfelev) %>%
+spread(key=track_id, value=bpm) %>%
+tail(-1) %>% head(190) %>% select(-time)
+
+```
+
+After that, the code creates a new dataframe called bpm_all. It starts from the all_tracks_repli dataframe, then it removes the dfelev column. The spread function creates a column for each track_id and for each track_id it stores in the relative column the bpm values (each one corresponding to the time of observation). tail(-1) removes the first observation, whereas head(190) keeps only the first 190 rows (track_id = 1). The time column is removed. At the end, we will have a matrix in which each column represents the time-series of bpm values of each track, without the first value of the series (this will allow the series to have the same lenght as the dfelev series).
+
+```{r comment=NA, echo = FALSE}
+
+dfe_all <- all_tracks_repli %>% select(-bpm) %>%
+spread(key=track_id, value=dfelev) %>%
+tail(-1) %>% head(190) %>% select(-time)
+
+```
+
+Then, the code creates another new dataframe called dfe_all. The code basically does the same as before, with dfelev in place of bpm. At the end, we will have a matrix in which each column represents the time-series of dfelev values of each track.
+
+```{r comment=NA, echo = FALSE}
+
+bpm_train <- bpm_all %>% head(190-np)
+dfe_train <- dfe_all %>% head(190-np)
+
+```
+
+After this data wrangling, the code creates two training and test sets for the models we are going to fit to the bpm and dfe datasets. In particular, we take the bpm_all and dfe_all dataframes and leave the last 10 rows aside for testing.
+
+```{r comment=NA, echo = FALSE}
+
+bpm_test <- bpm_all %>% tail(np)
+dfe_test <- dfe_all %>% tail(np)
+
+```
+After the data preparation phase, the modelling phase starts. 
+```{r comment=NA, echo = FALSE}
+
+single_track_mod <- function(FFx, pars){
+base_mod <- dlmModReg(FFx)
+diag(base_mod$V) <- exp(pars[1])
+diag(base_mod$W) <- c(0, exp(pars[2]))
+base_mod$m0 <- c(140,0)
+return(base_mod)
+}
+
+```
+
+First, the code creates a function called single_track_mod, with two parameters: FFx and pars. This function creates a DLM regression model as a function of the FFx parameter (which will be the regressors vector), and pars, a vector which stores transformed values for the V and W matrix. In particular, since the observation equation has only one dimension, V is actually a scalar, whereas W is a 2x2 matrix (in this model the state vector is made up of an intercept and a slope). We can notice that, as we usually assume, the covariance between the intercept and the slope shocks are by default 0, whereas the constant shock variance is set to zero: this means that the model will estimate a constant value that does not change across time (a constant constant).
+The initial estimates of the parameters are set to 140 for the constant and 0 for the intercept.
+
+```{r comment=NA, echo = FALSE}
+
+replicates_LL <- function(par, y_tab = bpm_all, x_tab = dfe_all){
+m <- y_tab %>% ncol()
+LL_vec <- rep(0, m)
+for(i in 1:m){
+LL_vec[i] <- dlmLL(y = y_tab %>% pull(i),
+single_track_mod(x_tab %>% pull(i), par))
+}
+return(LL_vec %>% sum())
+}
+
+```
+
+After the single_track_mod function, the code creates the replicates_LL function. The parameters of this function are: par, y_tab and x_tab. The last 2 parameters are set to default to bpm_all and dfe_all. m stores the number of columns of the y_tab parameter (which is going to be the bpm_all dataframe as default). LL_vec is initialized as an mx1 vector. After the initialization, we have a for loop that modify each component of LL_vec.
+In particular, the ith component of this vector is set to be the negative log-likelihood of the regression model we defined in the previous code chunk, with the i-th column of y_tab that plays the role of the dependent variable and the i-th column of the x_tab that plays the role of the regressor. The par parameter of the model is left unchanged to par.
+Finally, the function returns the sum of the components of LL_vec.
+Let us be clear on one point: what is usually done in practice, to estimate the parameters of a model, is minimizing the negative log-likelihood of one model, whereas in our case we are going to minimize the sum of the negative log likelihoods of different models, one for each track.
+
+```{r comment=NA, echo = FALSE}
+
+replicates_vars <- optim(rep(0,2),
+function(x) replicates_LL(x, bpm_train, dfe_train))
+
+```
+
+Once the code has defined these two function, it exploits them to compute maximum likelihood estimates of the unknown parameters. In particular, it stores in the replicates_vars variable the results of the optim function. The optim function if fed with a starting value of c(0,0) (it needs it in order to know where to start the iteration from), and then it is fed with the replicates_LL function, with par = x, y_tab = bpm_train and x_tab = dfe_train. optim will minimize replicates_LL by changing the par parameters (which is going to be made by the observation error and the evolution error of the slope, that are the parameters to be esimated by mle).
+What is usually done in practice, is to estimate the parameters of a model using MLE's, is minimizing the negative log-likelihood of one model, whereas in our case we are going to minimize the sum of the negative log likelihoods of different models, each one fitted for each track. The reason is that we wish to estimate parameters that could "fit" each track, thus we have to use the information coming from each track.
+
+```{r comment=NA, echo = FALSE}
+
+track_model <- single_track_mod(dfe_train %>% pull(which_track),
+replicates_vars$par)
+
+```
+Finally, the code creates a dlm object called track_model. The model is built using the single_track_mod function. The model is trained using the training set we defined before for the track we defined (track_seq = 62), using the parameters we estimated before for the variance-covariannce matrices of the random shocks.
+To recap, the whole code is written to estimate a single dynamic regression model, where bpm is the time-series we want to model, and dfelev is the regressor through which we want to explain bpm. Intuitively, we would say that the higher the difference in elevation the higher the bpm should be. Dynamic estimation should solve the problem of the non-linearity of the relationship between the two variables. The model could anyway suffer from omitted variables, such as lags of the dfelev variable or lags of the bpm variable itself. 
+
+```{r comment=NA, echo = FALSE}
+
+xreg_filtered <- bpm_train %>% pull(which_track) %>% dlmFilter(track_model)
+xreg_smoothed <- bpm_train %>% pull(which_track) %>% dlmSmooth(track_model)
+
+```
+After having created the dlm model, the code computes the the filtered and the smoothed dlm objects for the previously trained model. We are going to show such estmates on the next chart (only for the constant term).
+
+```{r comment=NA, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 2, fig.width = 6,  fig.align = "center"}
+
+#Using ggplot
+xreg_filtered_smoothed <- data.frame(time = time(xreg_filtered$m[,1]),
+                                     filter = xreg_filtered$m[,1],
+                                     smoother = xreg_smoothed$s[,1])
+
+xreg_filtered_smoothed_long <- xreg_filtered_smoothed %>%
+  gather(-time, key = "variable", value = "value")
+
+ggplot(xreg_filtered_smoothed_long,aes(x=time, y=value)) +
+  geom_line(aes(colour = variable)) +
+  facet_wrap( ~ variable, ncol=2) +
+  ylab("") + xlab("") +
+  th +
+  ggtitle("Filtered and Smoothed State estimates")
+
+```
+
+The plot shows the filtered and smoothed estimates of the constant term of the dynamic regression model. In the filter chart, we can see that it first swings around and then converges to 140. As for the smoother chart, we can see that the value immediately settles a little below 143.
